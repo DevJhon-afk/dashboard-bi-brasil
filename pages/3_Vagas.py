@@ -1,70 +1,88 @@
 # -*- coding: utf-8 -*-
-"""Panorama de mercado de vagas em dados/BI — dados agregados e anonimizados."""
+"""Panorama do mercado de vagas em dados/BI no Brasil — fonte Adzuna, agregado."""
 import pandas as pd
 import streamlit as st
 
 import lib
 
 st.set_page_config(page_title="Vagas", page_icon="💼", layout="wide")
-lib.cabecalho("💼 Panorama de Vagas em Dados & BI",
-              "Uma amostra do mercado de vagas em dados e BI no Brasil, coletada "
-              "de feeds públicos de emprego. Números agregados e anonimizados — "
-              "sem nome de empresa nem vaga individual.")
+lib.cabecalho("💼 Mercado de Vagas em Dados & BI",
+              "Quantas vagas o mercado brasileiro pede, por competência, "
+              "senioridade e região. Dados agregados da Adzuna — sem vaga "
+              "individual, sem empresa, sem candidato.")
 
-df = lib.ler_csv("vagas.csv")
+df = lib.ler_csv("vagas_mercado.csv")
 if df.empty:
-    st.info("Amostra ainda em formação — o monitor de vagas preenche isto "
-            "conforme novas oportunidades aparecem no mercado.")
+    st.info("Panorama ainda em formação — o coletor preenche isto na primeira "
+            "execução diária.")
     st.stop()
 
-df["salario"] = pd.to_numeric(df.get("salario"), errors="coerce")
-n = len(df)
+df["data"] = pd.to_datetime(df["data"])
+atual = df.sort_values("data").iloc[-1]
+
+CARGOS = [("power_bi", "Power BI"), ("sql", "SQL"), ("analytics", "Analytics"),
+          ("business_intelligence", "Business Intelligence"),
+          ("analista_dados", "Analista de Dados"),
+          ("engenheiro_dados", "Engenheiro de Dados"),
+          ("cientista_dados", "Cientista de Dados")]
+cargos = [(nome, int(atual[col])) for col, nome in CARGOS if col in atual]
+cargos.sort(key=lambda x: x[1], reverse=True)
+total = sum(v for _, v in cargos)
+lider = cargos[0]
 
 # --- KPIs ---
 k1, k2, k3 = st.columns(3)
-k1.metric("Vagas na amostra", n)
-sal = df["salario"].dropna()
-if not sal.empty:
-    k2.metric("Salário mediano", f"R$ {sal.median():,.0f}".replace(",", "."))
-else:
-    k2.metric("Salário mediano", "—")
-if "modelo" in df:
-    remoto = (df["modelo"].str.contains("remoto", case=False, na=False)).mean() * 100
-    k3.metric("Fatia de vagas remotas", f"{remoto:.0f}%")
+k1.metric("Vagas mapeadas", f"{total:,}".replace(",", "."),
+          help="Soma das buscas por competência; pode haver sobreposição "
+               "entre termos.")
+k2.metric("Maior demanda", lider[0], f"{lider[1]:,}".replace(",", ".") + " vagas")
+sen = {"Júnior": int(atual.get("jr", 0)), "Pleno": int(atual.get("pleno", 0)),
+       "Sênior": int(atual.get("sr", 0))}
+predom = max(sen, key=sen.get) if sum(sen.values()) else "—"
+k3.metric("Senioridade predominante", predom,
+          help="A partir de uma amostra de vagas de 'analista de dados'.")
 
-if n < 8:
-    st.info(f"Amostra ainda pequena ({n} vagas) — as proporções ficam mais "
-            "representativas conforme o monitor coleta mais vagas do mercado.",
-            icon="🌱")
-
+st.caption(f"📅 Snapshot de {atual['data'].strftime('%d/%m/%Y')}.")
 st.divider()
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.markdown("**Por modelo de trabalho**")
-    if "modelo" in df:
-        m = df["modelo"].str.lower().str.strip().value_counts()
-        st.plotly_chart(lib.barras(m.index.tolist(), m.values.tolist(),
-                                   cor=lib.CORES[0]), use_container_width=True)
-with col2:
-    st.markdown("**Por senioridade**")
-    if "senioridade" in df:
-        ordem = ["Estágio", "Júnior", "Pleno", "Sênior", "Especialista"]
-        s = df["senioridade"].str.strip().value_counts()
-        s = s.reindex([o for o in ordem if o in s.index])
-        st.plotly_chart(lib.barras(s.index.tolist(), s.values.tolist(),
-                                   cor=lib.CORES[2], horizontal=False),
-                        use_container_width=True)
-with col3:
-    st.markdown("**Por faixa salarial**")
-    faixas = pd.cut(sal, bins=[0, 3000, 5000, 8000, 12000, 1e9],
-                    labels=["até 3k", "3–5k", "5–8k", "8–12k", "12k+"])
-    fx = faixas.value_counts().reindex(
-        ["até 3k", "3–5k", "5–8k", "8–12k", "12k+"], fill_value=0)
-    st.plotly_chart(lib.barras(fx.index.tolist(), fx.values.tolist(),
-                               cor=lib.CORES[3], horizontal=False),
-                    use_container_width=True)
+# --- Competências mais pedidas (o destaque) ---
+st.markdown("**Competências mais pedidas pelo mercado**")
+st.plotly_chart(
+    lib.barras([n for n, _ in cargos], [v for _, v in cargos], cor=lib.CORES[0]),
+    use_container_width=True)
 
-st.caption("Amostra de vagas de dados/BI coletada automaticamente de feeds "
-           "públicos de emprego. Dados agregados: não identificam empresa nem "
-           "candidato. A base cresce a cada nova coleta.")
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown("**Por senioridade** (amostra)")
+    s = {k: v for k, v in sen.items() if v}
+    if s:
+        st.plotly_chart(
+            lib.barras(list(s.keys()), list(s.values()), cor=lib.CORES[2],
+                       horizontal=False),
+            use_container_width=True)
+with col2:
+    st.markdown("**Por região** (amostra)")
+    REG = [("sudeste", "Sudeste"), ("sul", "Sul"), ("nordeste", "Nordeste"),
+           ("centro_oeste", "Centro-Oeste"), ("norte", "Norte")]
+    reg = [(nome, int(atual[col])) for col, nome in REG
+           if col in atual and int(atual[col]) > 0]
+    reg.sort(key=lambda x: x[1], reverse=True)
+    if reg:
+        st.plotly_chart(
+            lib.barras([n for n, _ in reg], [v for _, v in reg], cor=lib.CORES[3]),
+            use_container_width=True)
+
+# --- evolução no tempo (cresce a cada coleta) ---
+if df["data"].nunique() > 1:
+    st.markdown("**Volume de vagas ao longo do tempo**")
+    cols_cargo = [c for c, _ in CARGOS if c in df.columns]
+    serie = df.assign(total=df[cols_cargo].sum(axis=1))[["data", "total"]]
+    st.plotly_chart(lib.linha(serie, "data", "total", cor=lib.CORES[0]),
+                    use_container_width=True)
+else:
+    st.info("O gráfico de evolução aparece conforme o coletor roda mais dias.",
+            icon="📈")
+
+st.caption("Fonte: Adzuna (base de vagas do Brasil), coletada e agregada por um "
+           "pipeline diário em n8n. Salário não é exibido porque a fonte não tem "
+           "dado salarial confiável para o Brasil.")

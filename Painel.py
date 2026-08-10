@@ -49,8 +49,8 @@ with c2:
              "Portal Nacional de Contratações Públicas (PNCP).")
 with c3:
     st.markdown("### 💼 Vagas")
-    st.write("Vagas de dados e BI capturadas automaticamente, por faixa salarial "
-             "e modelo de trabalho.")
+    st.write("O que o mercado brasileiro de dados e BI pede — vagas por "
+             "competência, senioridade e região (fonte Adzuna).")
 
 st.info("Use o menu à esquerda para navegar entre as áreas.", icon="👈")
 
